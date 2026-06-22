@@ -1,0 +1,39 @@
+# ===== Secrets (NEVER commit) =====
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# ===== Python env / cache =====
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ===== Data & evidence (sensitive + large) -> transfer to host separately =====
+/data/
+/volumes/
+/eval/results/
+/eval/cer_ref_review/
+/eval/sets/
+/eval/_check/
+# 증거 내용/정답 파일(코드 레포에 미포함, Spark로 따로 전송)
+/eval/cer_ref/*.txt
+/eval/cer_ref/*.bak*
+/eval/queries.jsonl
+/eval/ner_gold.jsonl
+
+# ===== Local DB / demo / temp artifacts =====
+*.db
+*.db.vec.json
+demo*
+tmp_*
+*.log
+
+# ===== Keep (override) =====
+!.env.example

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Figures 1 & 2 — 2-Agent 포렌식 수사 질의 시스템</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'neutral', flowchart: { curve: 'basis' } });</script>
+<style>
+  body { font-family: 'Malgun Gothic', sans-serif; margin: 32px; color:#222; }
+  h2 { border-bottom: 2px solid #333; padding-bottom: 6px; margin-top: 40px; }
+  .cap { color:#444; font-size: 14px; margin: 8px 0 20px; }
+  .note { background:#f6f6f6; padding:10px 14px; border-left:4px solid #888; font-size:13px; }
+  .mermaid { background:#fff; }
+</style>
+</head>
+<body>
+<p class="note">사용법: 이 파일을 브라우저로 열면 그림이 렌더됩니다. 그림 위 우클릭 → 이미지 저장, 또는 화면 캡처해서 논문(Figure 1·2)에 넣으세요. (캡션은 본문 기말_01 참조)</p>
+
+<h2>Figure 1. 전체 시스템 아키텍처</h2>
+<p class="cap">마름모=의사결정 지점, 점선=실패/저커버리지 시 복구(fallback) 경로, 육각형=Human-in-the-Loop.</p>
+<div class="mermaid">
+flowchart TB
+  F["압수 C드라이브<br/>PDF·TXT·HWP·이미지·음성"]:::in
+
+  subgraph A1["Agent 1 — 수집·구조화 (LLM 직접 도구호출)"]
+    direction TB
+    DT{"detect_type<br/>유형·전략 판단"}
+    PA["parse 도구<br/>pdf_text / vlm_ocr / hwp / stt"]
+    QA{"품질 충분?"}
+    NER["extract_entities<br/>NER 5종"]
+    DT --> PA --> QA
+    QA -. "No: 대체 전략" .-> PA
+    QA -- "Yes" --> NER
+  end
+
+  subgraph STORE["공유 저장소 (유일 인터페이스)"]
+    PG[("PostgreSQL<br/>documents · entities")]
+    MV[("Milvus<br/>키워드+벡터 인덱스")]
+  end
+
+  subgraph A2["Agent 2 — 수사 질의 (ReAct)"]
+    direction TB
+    UQ["수사관 자연어 질의"]
+    CL{"질문 유형 분류"}
+    RE["resolve_entity<br/>하이브리드 검색"]
+    TS["text_to_sql"]
+    EX["execute_sql"]
+    DC{"결과 충분?"}
+    VF["verify<br/>출처 grounding"]
+    UQ --> CL
+    CL -- "fuzzy" --> RE --> TS
+    CL -- "lookup/relational/aggregate" --> TS
+    TS --> EX --> DC
+    DC -. "0건 → broaden" .-> RE
+    DC -- "충분" --> VF
+  end
+
+  F --> DT
+  NER --> PG
+  NER --> MV
+  PG --- TS
+  MV --- RE
+  VF --> HITL{{"HITL<br/>수사관 승인 / 보완"}}
+  HITL -. "보완 재질의" .-> CL
+  HITL -- "승인" --> OUT["최종 응답<br/>결과 + 생성 SQL + 근거"]:::out
+
+  classDef in fill:#e8f0fe,stroke:#3367d6;
+  classDef out fill:#e6f4ea,stroke:#1e8e3e;
+</div>
+
+<h2>Figure 2. 에이전트 워크플로우 (LangGraph / 도구호출 루프)</h2>
+<p class="cap">Agent 1: LLM이 도구를 직접 호출하며 품질 미달 시 다른 파서로 복구. Agent 2: ReAct 루프에서 정밀→확장(narrow↔broaden) 검색정책.</p>
+<div class="mermaid">
+flowchart LR
+  subgraph G1["Agent 1 (도구호출 에이전트)"]
+    direction TB
+    s1(["시작: 파일 1건"]) --> d1["detect_type"]
+    d1 --> p1["parse(strategy)"]
+    p1 --> a1{"quality ≥ 0.6 ?"}
+    a1 -. "No & 전략 남음" .-> p1
+    a1 -- "Yes / 소진" --> e1["extract_entities"]
+    e1 --> f1["finalize<br/>적재 + 벡터색인"]
+    f1 --> z1(["종료"])
+  end
+
+  subgraph G2["Agent 2 (ReAct 질의)"]
+    direction TB
+    s2(["질의 입력"]) --> c2["classify_query"]
+    c2 --> r2{"fuzzy?"}
+    r2 -- "Yes" --> rv2["resolve_entity<br/>(하이브리드)"]
+    r2 -- "No" --> g2["gen_sql"]
+    rv2 --> g2 --> x2["execute_sql"]
+    x2 --> dd2{"결과 충분?<br/>(반복≤K)"}
+    dd2 -. "0건: 해소→완화(broaden)" .-> rv2
+    dd2 -- "충분/최대반복" --> v2["verify → format"]
+    v2 --> h2{{"HITL 검토"}}
+    h2 -. "보완" .-> c2
+    h2 -- "승인" --> z2(["응답"])
+  end
+</div>
+
+</body>
+</html>
