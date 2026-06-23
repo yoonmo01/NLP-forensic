@@ -2,9 +2,10 @@
 
 설계:
   - DB(파싱+NER, Agent1 영역)는 1회 구축. Agent2 질의만 K회 반복.
-  - RDB = PostgreSQL, 벡터 = Milvus. 실험·반복마다 분리하지 않고 'DB는 실행당 1개'.
-    (반복은 Agent2 질의만 재실행하므로 같은 DB/컬렉션을 읽음. NER/CER/파싱은 단일값.)
-  - 결과물은 eval/results/run_<UTC타임스탬프>/ 에 전부 보존. DB는 라이브 유지 + pg_dump 덤프.
+  - 백엔드는 .env(CFG)를 따름. 기본 = SQLite + 로컬 하이브리드(무Docker, DGX Spark 로컬 실행).
+    옵션 = PostgreSQL + Milvus. 어느 쪽이든 'DB는 실행당 1개'(반복은 Agent2 질의만 재실행).
+  - 결과물은 eval/results/run_<UTC타임스탬프>/ 에 전부 보존.
+    sqlite는 run/db/*.db 파일 그대로, postgres는 라이브 유지 + pg_dump 덤프.
 
 지표:
   H1 CER(유형별)  ·  H2 NER Recall(유형별)  ·  H3 질의(Recall@k·MRR·SQL·AnswerHit, K회 평균±std)
@@ -86,16 +87,15 @@ def main() -> None:
     ap.add_argument("--results-dir", default="eval/results")
     args = ap.parse_args()
 
-    # 백엔드 강제: PostgreSQL + Milvus
-    os.environ.setdefault("RELATIONAL_BACKEND", "postgres")
-    os.environ["VECTOR_BACKEND"] = "milvus"
-
+    # 백엔드: .env(CFG) 값을 존중. 기본 sqlite + local(무Docker). postgres+milvus도 옵션 지원.
     if args.fake:
         import mock_llm
         mock_llm.apply_fakes()
 
     from config import CFG
-    CFG.vector_backend = "milvus"
+    use_pg = CFG.relational_backend == "postgres"
+    use_milvus = CFG.vector_backend == "milvus"
+    log(f"backend: relational={CFG.relational_backend} vector={CFG.vector_backend}")
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     run = Path(args.results_dir) / f"run_{ts}"
@@ -114,10 +114,18 @@ def main() -> None:
     ner_gold = RE.load_ner_gold(Path(args.ner_gold))
     log(f"queries={len(queries)} ner_gold_files={len(ner_gold)} repeats={args.repeats} fake={args.fake}")
 
-    # 1) 실행 전용 DB + Milvus 컬렉션
-    newdb, host, port, user = create_run_db(ts)
-    CFG.milvus_collection = f"entities_run_{ts}"
-    log(f"milvus collection: {CFG.milvus_collection}")
+    # 1) 실행 전용 DB(+벡터 네임스페이스) — 백엔드별
+    if use_pg:
+        newdb, host, port, user = create_run_db(ts)
+    else:
+        # sqlite: 실행 전용 DB 파일. 로컬 벡터는 같은 경로 + ".vec.json" 자동 사용.
+        run_db = (run / "db" / f"forensic_run_{ts}.db").resolve()
+        CFG.db_path = str(run_db)
+        newdb, host, port, user = run_db.name, "localhost", 0, ""
+        log(f"sqlite db: {run_db}")
+    if use_milvus:
+        CFG.milvus_collection = f"entities_run_{ts}"
+        log(f"milvus collection: {CFG.milvus_collection}")
 
     # 2) 적재(Agent1) — 1회: 파싱·NER·DB·벡터
     from agent1.toolcall import ingest_dir_toolcall
@@ -264,8 +272,8 @@ def main() -> None:
             lines.append(f"| {k} | {q_summary[k]['mean']:.3f} | {q_summary[k]['std']:.3f} |")
     (run / "tables" / "summary.md").write_text("\n".join(lines), encoding="utf-8")
 
-    # 10) DB 덤프(best-effort)
-    if not args.skip_dump:
+    # 10) DB 덤프(best-effort) — postgres만. sqlite는 run/db/ 에 .db 파일 그대로 보존됨.
+    if not args.skip_dump and use_pg:
         dump_db(newdb, host, port, user, run / "db" / f"{newdb}.sql")
 
     # 11) INDEX.md 갱신(append)
