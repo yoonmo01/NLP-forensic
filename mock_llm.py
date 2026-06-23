@@ -83,8 +83,10 @@ def apply_fakes():
     """에이전트 모듈의 LLM 바인딩을 가짜로 교체."""
     import agent1.graph as a1g
     import agent1.tools as a1t
+    import agent1.toolcall as a1tc
     import agent2.tools as a2t
     a1g.embed = fake_embed
+    a1tc.embed = fake_embed          # toolcall 적재도 가짜 임베딩(차원 일치) — graph/toolcall 양쪽 커버
     a1t.run_ner = fake_ner
     a1t.upstage_document_parse = fake_parse_file
     a1t.vlm_ocr_pdf = fake_parse_file

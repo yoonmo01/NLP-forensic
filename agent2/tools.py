@@ -15,10 +15,10 @@ _CLS_SYS = (
 )
 
 
-def _classify_once(query: str, vary: bool) -> str:
+def _classify_once(query: str, temperature: float = 0.0) -> str:
     try:
         d = chat_json(_CLS_SYS, f"질의: {query}",
-                      temperature=(0.4 if vary else 0.0), use_seed=not vary)
+                      temperature=temperature, use_seed=(temperature == 0.0))
         t = d.get("type", "lookup")
         return t if t in QUERY_TYPES else "lookup"
     except Exception:
@@ -29,9 +29,9 @@ def classify_query(query: str) -> dict:
     """질의 유형 분류. self_consistency_n>1이면 K회 다수결(일관성)."""
     n = max(1, CFG.self_consistency_n)
     if n == 1:
-        return {"type": _classify_once(query, False), "reason": "single"}
+        return {"type": _classify_once(query, CFG.query_temperature), "reason": "single"}
     from collections import Counter
-    votes = [_classify_once(query, True) for _ in range(n)]
+    votes = [_classify_once(query, 0.4) for _ in range(n)]
     top, _ = Counter(votes).most_common(1)[0]
     return {"type": top, "reason": f"vote {dict(Counter(votes))}"}
 
@@ -64,7 +64,8 @@ def text_to_sql(query: str, *, hints: list[str] | None = None, relax: bool = Fal
     sys = _SQL_SYS.format(schema=R.schema_text())
     n = max(1, CFG.self_consistency_n)
     if n == 1:
-        return _clean_sql(chat(sys, user))
+        return _clean_sql(chat(sys, user, temperature=CFG.query_temperature,
+                               use_seed=(CFG.query_temperature == 0.0)))
     from collections import Counter
     cands = [_clean_sql(chat(sys, user, temperature=0.4, use_seed=False)) for _ in range(n)]
     return Counter(cands).most_common(1)[0][0]
@@ -136,7 +137,8 @@ def _local_groundedness(context: str, answer: str) -> dict:
     sys = ("다음 답변이 주어진 근거 문맥에 의해 뒷받침되는지 판단하라. "
            "'grounded' 또는 'not_grounded' 중 한 단어로만 답하라.")
     user = f"Context:\n{context}\n\nAnswer:\n{answer}"
-    raw = chat(sys, user).strip()
+    raw = chat(sys, user, temperature=CFG.query_temperature,
+               use_seed=(CFG.query_temperature == 0.0)).strip()
     grounded = _interpret_groundedness(raw)
     return {
         "grounded": bool(grounded) if grounded is not None else True,

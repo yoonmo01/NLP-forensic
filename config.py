@@ -83,6 +83,8 @@ class Config:
     # 일관성: 고정 시드(빈 값이면 비활성 — 미지원 엔드포인트 대비). self-consistency 표본 수.
     seed: int | None = (int(os.getenv("LLM_SEED")) if os.getenv("LLM_SEED") else None)
     self_consistency_n: int = int(os.getenv("SELF_CONSISTENCY_N", "1"))
+    # Agent2 질의 단계 온도. 0=결정론(기본). >0이면 분류·SQL·근거검증을 비결정으로 → EQ3 응답 변동 측정.
+    query_temperature: float = float(os.getenv("QUERY_TEMPERATURE", "0"))
 
     db_path: str = os.getenv("DB_PATH", "./forensic.db")
     relational_backend: str = os.getenv("RELATIONAL_BACKEND", "sqlite")  # sqlite | postgres
